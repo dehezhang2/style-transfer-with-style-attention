@@ -36,7 +36,6 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self):
         super(Decoder, self).__init__()
-#         self.layer_names = ['inv_conv4', 'inv_conv3', 'inv_conv2', 'inv_conv1']
         self.deconv_4 = nn.Sequential(
                 nn.ReflectionPad2d((1, 1, 1, 1)),
                 nn.Conv2d(512, 256, (3, 3)),
@@ -109,7 +108,7 @@ class SelfAttention(nn.Module):
         return ret
 
 class AttentionNet(nn.Module):
-    def __init__(self, seperate=False):
+    def __init__(self, seperate=False, attn=None, decoder=None):
         super(AttentionNet, self).__init__()
         self.perceptual_loss_layers = ['conv1', 'conv2', 'conv3', 'conv4']
 
@@ -129,8 +128,8 @@ class AttentionNet(nn.Module):
             self.content_decode = Decoder()
             self.style_decode = Decoder()
         else:
-            self.self_attn = SelfAttention()
-            self.decode = Decoder()
+            self.self_attn = SelfAttention() if attn == None else attn
+            self.decode = Decoder() if decoder == None else decoder
 
         self.mse_loss = nn.MSELoss()
 
