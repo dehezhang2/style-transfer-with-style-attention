@@ -1,0 +1,5 @@
+.ipynb_checkpoints
+val2014
+__pycache__
+models
+logs
