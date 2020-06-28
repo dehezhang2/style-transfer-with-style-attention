@@ -87,6 +87,7 @@ class Decoder(nn.Module):
         x = self.deconv_1(x)
         return x + (127.5/255.0)
 
+# Self Attention Module
 class SelfAttention(nn.Module):
     def __init__(self):
         super(SelfAttention, self).__init__()
@@ -107,6 +108,7 @@ class SelfAttention(nn.Module):
         ret = ret.view(x_size)# [b, c, h, w]
         return ret
 
+# Reconstruction Network with Self-attention Module
 class AttentionNet(nn.Module):
     def __init__(self, seperate=False, attn=None, decoder=None):
         super(AttentionNet, self).__init__()
@@ -132,9 +134,6 @@ class AttentionNet(nn.Module):
             self.decode = Decoder() if decoder == None else decoder
 
         self.mse_loss = nn.MSELoss()
-
-    # def self_attention(self, x, size):
-    #     pass
 
     def self_attention_autoencoder(self, x, cal_self_attn): # in case kernels are not seperated
         input_features = self.encode(x)
@@ -176,9 +175,9 @@ class AttentionNet(nn.Module):
         # seperate must be False in this case
         output, attention_feature_map = self.self_attention_autoencoder(x, self.self_attn)
         output = utils.batch_mean_image_subtraction(output)
-        recon_loss = self.calc_recon_loss(x, output)
-        perceptual_loss =  self.calc_perceptual_loss(x, output)
-        tv_loss = self.calc_tv_loss(output)
+        recon_loss = self.calc_recon_loss(x, output) * (255**2 / 4)
+        perceptual_loss =  self.calc_perceptual_loss(x, output) * (255**2 / 4)
+        tv_loss = self.calc_tv_loss(output) * (255 / 2)
         attention_loss = self.calc_attention_loss(attention_feature_map)
         total_loss = recon_loss * self.recons_weight + perceptual_loss * self.perceptual_weight \
                     + tv_loss * self.tv_weight + attention_loss * self.attention_weight
