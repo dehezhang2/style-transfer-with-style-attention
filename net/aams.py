@@ -135,6 +135,12 @@ class AttentionNet(nn.Module):
 
         self.mse_loss = nn.MSELoss()
 
+    def get_layers(self):
+        return self.perceptual_loss_layers
+
+    def get_encoder(self):
+        return self.encode
+
     def self_attention_autoencoder(self, x, cal_self_attn): # in case kernels are not seperated
         input_features = self.encode(x)
         projected_hidden_feature, colorization_kernels, mean_features = utils.adain_normalization(input_features['conv4'])

@@ -34,6 +34,51 @@ def adain_normalization(features):
 def adain_colorization(normalized_features, colorization_kernels, mean_features):
     return colorization_kernels * normalized_features + mean_features
 
+def zca_normalization(features):
+    # [b, c, h, w]
+    shape = features.shape
+
+    # reshape the features to orderless feature vectors
+    mean_features = torch.mean(features, dim=(2, 3), keepdims=True)
+    unbiased_features = (features - mean_features).view(shape[0], shape[1], -1) # [b, c, h*w]
+
+    # get the convariance matrix
+    gram = torch.bmm(unbiased_features, unbiased_features.permute(0, 2, 1)) # [b, c, c]
+    gram = gram / (shape[1] * shape[2] * shape[3])
+
+    # converting the feature spaces
+    u, s, v = torch.svd(gram, compute_uv=True)
+    # u: [b, c, c], s: [b, c], v: [b, c, c]
+    s = torch.unsqueeze(s, dim=1)
+
+    # get the effective singular values
+    valid_index = (s > 0.00001).float()
+    temp = torch.empty(s.shape).fill_(0.00001).cuda()
+    s_effective = torch.max( s,  temp)
+    sqrt_s_effective = torch.sqrt(s_effective) * valid_index
+    sqrt_inv_s_effective = torch.sqrt(1.0 / s_effective) * valid_index
+
+    # colorization functions
+    colorization_kernel = torch.bmm((u * sqrt_s_effective), v.permute(0, 2, 1))
+
+    # normalized features
+    normalized_features = torch.bmm(unbiased_features.permute(0, 2, 1), u).permute(0, 2, 1)
+    normalized_features = (normalized_features.permute(0, 2, 1) * sqrt_inv_s_effective).permute(0, 2, 1)
+    normalized_features = torch.bmm(normalized_features.permute(0, 2, 1), v.permute(0, 2, 1)).permute(0, 2, 1)
+    normalized_features = normalized_features.view(shape)
+
+    return normalized_features, colorization_kernel, mean_features
+
+def zca_colorization(normalized_features, colorization_kernel, mean_features):
+    # broadcasting the tensors for matrix multiplication
+    shape = normalized_features.shape
+    normalized_features = normalized_features.view(shape[0], shape[1], -1) # [b, c, h*w]
+
+    colorized_features = torch.bmm(normalized_features.permute(0, 2, 1), colorization_kernel).permute(0, 2, 1)
+    colorized_features = colorized_features.view(shape) + mean_features
+
+    return colorized_features
+
 def hw_flatten(x):
     # [b, c, h, w] -> [b, c, h * w]
     return x.view(x.shape[0], x.shape[1], -1)
@@ -50,4 +95,56 @@ def batch_mean_image_subtraction(images, means=(_R_MEAN, _G_MEAN, _B_MEAN)):
     for i in range(num_channels):
         channels[i] = channels[i] - means[i]
     return torch.cat(channels, dim=1)
+
+def truncated_normal_(tensor, mean=0, std=1):
+    size = tensor.shape
+    tmp = tensor.new_empty(size + (4,)).normal_()
+    valid = (tmp < 2) & (tmp > -2)
+    ind = valid.max(-1, keepdim=True)[1]
+    tensor.data.copy_(tmp.gather(-1, ind).squeeze(-1))
+    tensor.data.mul_(std).add_(mean)
     
+def project_features(features, projection_module='ZCA'):
+    if projection_module == 'ZCA':
+        return zca_normalization(features)
+    elif projection_module == 'AdaIN':
+        return adain_normalization(features)
+    else:
+        return features, None, None
+
+def reconstruct_features(projected_features, feature_kernels, mean_features, reconstruction_module='ZCA'):
+    if reconstruction_module == 'ZCA':
+        return zca_colorization(projected_features, feature_kernels, mean_features)
+    elif reconstruction_module == 'AdaIN':
+        return adain_colorization(projected_features, feature_kernels, mean_features)
+    else:
+        return projected_features
+
+# https://www.kernel-operations.io/keops/_auto_tutorials/kmeans/plot_kmeans_torch.html
+def KMeans(x, K=10, Niter=80, verbose=True):
+    N, D = x.shape  # Number of samples, dimension of the ambient space
+
+    # K-means loop:
+    # - x  is the point cloud,
+    # - cl is the vector of class labels
+    # - c  is the cloud of cluster centroids
+
+    c = x[:K, :].clone()  # Simplistic random initialization
+    x_i = x.unsqueeze(1)  # (Npoints, 1, D)
+    for i in range(Niter):
+        c_j = c.unsqueeze(0)  # (1, Nclusters, D)
+        D_ij = ((x_i - c_j) ** 2).sum(-1)  # (Npoints, Nclusters) symbolic matrix of squared distances
+        cl = D_ij.argmin(dim=1).long().view(-1)  # Points -> Nearest cluster
+
+        Ncl = torch.bincount(cl).type(torch.float64)  # Class weights
+        for d in range(D):  # Compute the cluster centroids with torch.bincount:
+            c[:, d] = torch.bincount(cl, weights=x[:, d]) / Ncl
+            
+    return cl, c
+
+if __name__ == '__main__':
+    torch.manual_seed(0)
+    a = torch.randn(1, 512, 32, 32)
+    b, c, d = project_features(a, 'ZCA')
+    e = reconstruct_features(b, c, d, 'ZCA')
+    print(e - a)
