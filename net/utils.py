@@ -139,7 +139,8 @@ def KMeans(x, K=10, Niter=80, verbose=True):
         Ncl = torch.bincount(cl).type(torch.float64)  # Class weights
         for d in range(D):  # Compute the cluster centroids with torch.bincount:
             c[:, d] = torch.bincount(cl, weights=x[:, d]) / Ncl
-            
+
+    c, cl = c.sort(axis=0)
     return cl, c
 
 if __name__ == '__main__':

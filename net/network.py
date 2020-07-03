@@ -135,9 +135,6 @@ class AttentionNet(nn.Module):
 
         self.mse_loss = nn.MSELoss()
 
-    def get_layers(self):
-        return self.perceptual_loss_layers
-
     def get_encoder(self):
         return self.encode
 

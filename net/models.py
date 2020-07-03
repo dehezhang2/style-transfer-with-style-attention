@@ -1,4 +1,4 @@
-from net.aams import AttentionNet
+from net.network import AttentionNet
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,7 +8,6 @@ from net.utils import truncated_normal_, KMeans, project_features
 class AAMS():
     def __init__(self, attention_net):
         self.attention_net = attention_net
-        self.perceptual_loss_layers = attention_net.get_layers()
         self.encode = attention_net.get_encoder()
 
     # https://github.com/irasin/Pytorch_Style_Swap
@@ -53,7 +52,7 @@ class AAMS():
         assert (c_shape[1] == s_shape[1]) # same along the channel dimension
         
         combined_feature_maps = []
-        for beta in [1.1/2, 1.1/(2**0.5), 1.1]:
+        for beta in [1.0/2, 1.0/(2**0.5), 1.0]:
             new_height = int(float(s_shape[2]) * beta)
             new_width = int(float(s_shape[3]) * beta)
 
@@ -127,35 +126,41 @@ class AAMS():
         attention_map = attention_map / torch.max(attention_map)
         return attention_map
     
-    def transfer(self, contents, styles, inter_weight=1):
-        content_features = self.encode(contents)
-        style_features = self.encode(styles)
+    def transfer(self, contents, styles, inter_weight=1, projection_method='ZCA'):
+        content_features = self.attention_net.encode(contents)
+        style_features = self.attention_net.encode(styles)
 
-        content_hidden_feature = content_features[self.perceptual_loss_layers[-1]]
-        style_hidden_feature = style_features[self.perceptual_loss_layers[-1]]
+        content_hidden_feature = content_features[self.attention_net.perceptual_loss_layers[-1]]
+        style_hidden_feature = style_features[self.attention_net.perceptual_loss_layers[-1]]
 
-        projected_content_features, _, _ = utils.project_features(content_hidden_feature, 'ZCA')
-        projected_style_features, style_kernels, mean_style_features = utils.project_features(style_hidden_feature, 'ZCA')
+        projected_content_features, content_kernels, mean_content_features = utils.project_features(content_hidden_feature, projection_method)
+        projected_style_features, style_kernels, mean_style_features = utils.project_features(style_hidden_feature, projection_method)
 
-        attention_feature_map = self.attention_net.self_attn(projected_content_features)
-        projected_content_features = projected_content_features * attention_feature_map + projected_content_features
+        content_attention_feature_map = self.attention_net.self_attn(projected_content_features)
+        style_attention_feature_map = self.attention_net.self_attn(projected_style_features)
+        projected_content_features = projected_content_features * content_attention_feature_map + projected_content_features
         
-        attention_map = self.attention_filter(attention_feature_map)
+        content_attention_map = self.attention_filter(content_attention_feature_map)
+        style_attention_map = self.attention_filter(style_attention_feature_map)
 
         multi_swapped_features = self.multi_scale_style_swap(projected_content_features, projected_style_features)
-        outputs = []
+        seperate_strokes = []
         for feature in multi_swapped_features:
-            reconstructed_features = utils.reconstruct_features(feature, style_kernels, mean_style_features, 'ZCA')
-            outputs.append(self.attention_net.decode(reconstructed_features, style_features))
-        fused_features, centroids = self.multi_stroke_fusion(multi_swapped_features, attention_map, theta=50.0, mode='softmax')
+            reconstructed_features = utils.reconstruct_features(feature, style_kernels, mean_style_features, projection_method)
+            temp = self.attention_net.decode(reconstructed_features, style_features)
+            temp = utils.batch_mean_image_subtraction(temp)
+            seperate_strokes.append(temp)
+
+        fused_features, centroids = self.multi_stroke_fusion(multi_swapped_features, content_attention_map, theta=50.0, mode='softmax')
 
         fused_features = inter_weight * fused_features + (1 - inter_weight) * projected_content_features
 
-        reconstructed_features = utils.reconstruct_features(fused_features, style_kernels, mean_style_features, 'ZCA')
+        reconstructed_features = utils.reconstruct_features(fused_features, style_kernels, mean_style_features, projection_method)
         output = self.attention_net.decode(reconstructed_features, style_features)
-        return output, attention_map, centroids, outputs
-        # return outputs, attention_map
+        output = utils.batch_mean_image_subtraction(output)
+        return output, content_attention_map, style_attention_map, centroids, seperate_strokes
 
-
+class SAVA():
+    pass
 
             
