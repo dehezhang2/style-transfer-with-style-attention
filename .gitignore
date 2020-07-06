@@ -1,6 +1,5 @@
 .ipynb_checkpoints
 datasets
 __pycache__
-models
 logs
 test_result

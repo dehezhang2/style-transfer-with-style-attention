@@ -89,24 +89,27 @@ class Decoder(nn.Module):
 
 # Self Attention Module
 class SelfAttention(nn.Module):
-    def __init__(self):
+    def __init__(self, attn = None):
         super(SelfAttention, self).__init__()
-        self.f = nn.Conv2d(FEATURE_CHANNEL, FEATURE_CHANNEL // 2, kernel_size=1) # [b, c', h, w]
-        self.g = nn.Conv2d(FEATURE_CHANNEL, FEATURE_CHANNEL // 2, kernel_size=1) # [b, c', h, w]
-        self.h = nn.Conv2d(FEATURE_CHANNEL, FEATURE_CHANNEL, kernel_size=1) # [b, c, h, w]
+        self.f = nn.Conv2d(FEATURE_CHANNEL, FEATURE_CHANNEL // 2, kernel_size=1) # [b, floor(c/2), h, w]
+        self.g = nn.Conv2d(FEATURE_CHANNEL, FEATURE_CHANNEL // 2, kernel_size=1) # [b, floor(c/2), h, w]
+        self.h = nn.Conv2d(FEATURE_CHANNEL, FEATURE_CHANNEL, kernel_size=1)      # [b, c, h, w]
         self.softmax = nn.Softmax(dim=-1)
+        self.attn = attn
 
 
     def forward(self, x):
-        x_size = x.shape
-        f = utils.hw_flatten(self.f(x)).permute(0, 2, 1) # [b, n, c']
-        g = utils.hw_flatten(self.g(x)) # [b, c', n]
-        h = utils.hw_flatten(self.h(x)) # [b, c, n]
-        energy = torch.bmm(f, g) # [b, n, n]
-        attention = self.softmax(energy) # [b, n, n]
-        ret = torch.bmm(h, attention.permute(0, 2, 1)) # [b, c, n]
-        ret = ret.view(x_size)# [b, c, h, w]
-        return ret
+        if self.attn == None:
+            x_size = x.shape
+            f = utils.hw_flatten(self.f(x)).permute(0, 2, 1) # [b, n, c']
+            g = utils.hw_flatten(self.g(x)) # [b, c', n]
+            h = utils.hw_flatten(self.h(x)) # [b, c, n]
+            energy = torch.bmm(f, g) # [b, n, n]
+            attention = self.softmax(energy) # [b, n, n]
+            ret = torch.bmm(h, attention.permute(0, 2, 1)) # [b, c, n]
+            ret = ret.view(x_size)# [b, c, h, w]
+            return ret
+        return self.attn
 
 # Reconstruction Network with Self-attention Module
 class AttentionNet(nn.Module):
@@ -138,13 +141,13 @@ class AttentionNet(nn.Module):
     def get_encoder(self):
         return self.encode
 
-    def self_attention_autoencoder(self, x, cal_self_attn): # in case kernels are not seperated
+    def self_attention_autoencoder(self, x, cal_self_attn, projection_method='AdaIN'): # in case kernels are not seperated
         input_features = self.encode(x)
-        projected_hidden_feature, colorization_kernels, mean_features = utils.adain_normalization(input_features['conv4'])
+        projected_hidden_feature, colorization_kernels, mean_features = utils.project_features(input_features['conv4'], projection_method)
         attention_feature_map = cal_self_attn(projected_hidden_feature)
 
         hidden_feature = projected_hidden_feature * attention_feature_map + projected_hidden_feature
-        hidden_feature = utils.adain_colorization(hidden_feature, colorization_kernels, mean_features)
+        hidden_feature = utils.reconstruct_features(hidden_feature, colorization_kernels, mean_features, projection_method)
 
         output = self.decode(hidden_feature, input_features)
         return output, attention_feature_map
