@@ -1,5 +1,7 @@
 .ipynb_checkpoints
-datasets
+content_set
+content_style_mix_set
+style_set
 __pycache__
 logs
 test_result
